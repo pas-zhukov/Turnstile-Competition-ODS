@@ -6,6 +6,9 @@ from torch.utils.data.sampler import SubsetRandomSampler, Sampler, SequentialSam
 import os
 from datetime import datetime
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import make_column_transformer
+from some_func import get_time_of_day, holidays
 
 # Подключим видеокарту!
 if torch.cuda.is_available():
@@ -66,7 +69,7 @@ def get_alternative_loaders(batch_size: int, data_train, validation_split=.2):
 
     split = int(np.floor(validation_split * len(data_train)))
     indices = list(range(len(data_train)))
-    train_indices, val_indices = indices[split:], indices[:split]
+    train_indices, val_indices =  indices[split:], indices[:split]
 
     train_sampler = SequentialSampler(train_indices)
     val_sampler = SequentialSampler(val_indices)
@@ -94,8 +97,8 @@ class TurnstileDataset(Dataset):
         self.train_data = pd.read_csv(os.path.join('train.csv'))
         self.test_data = pd.read_csv(os.path.join('test.csv'))
 
-        self.X_train, self.y_train = self.vectorize_data('5_clear_train.csv')
-        self.X_test, self.y_test = self.vectorize_data('5_clear_test.csv', test=True)
+        self.X_train, self.y_train = get_train_test_data()[0]
+        self.X_test, self.y_test = get_train_test_data()[1]
 
         self.normalize = normalize
         if self.normalize:
@@ -170,3 +173,59 @@ class TurnstileDataset(Dataset):
             X_data_train.to_csv('train2222.csv')
 
         return np.array(X_data_train.astype(int, copy=True)), np.array(y_data_train.astype(int, copy=True))
+
+
+def get_features(data: pd.DataFrame) -> pd.DataFrame:
+    data = data.copy()
+    # Преобразуем временную метку в объект datetime
+    data['timestamp'] = pd.to_datetime(data['timestamp'])
+
+    # Создаем признаки день недели, время суток, праздничный ли день
+    data['day_of_the_week'] = data['timestamp'].dt.dayofweek
+    data['part_of_the_day'] = data['timestamp'].dt.hour.apply(get_time_of_day)
+    data['holiday'] = data['timestamp'].dt.date.astype(str).isin(holidays)
+    data['holiday'] = data['holiday'].astype(int)
+
+    # Создаем признак время года
+    data['season'] = pd.cut(data['timestamp'].dt.month,
+                            bins=[0, 3, 6, 9, 12],
+                            labels=['winter', 'spring', 'summer', 'autumn'])
+
+    # День месяца, часы, минуты, секунды
+    data['day_of_month'] = data['timestamp'].dt.day
+    data['hour'] = data['timestamp'].dt.hour
+    data['min'] = data['timestamp'].dt.minute
+    data['sec'] = data['timestamp'].dt.second
+
+    # Время между проходами через конкретный турникет и время между каждой записью
+    data['time_between_passes'] = data.groupby('gate_id')['timestamp'].diff().dt.total_seconds()
+    data['time_between_passes'] = data['time_between_passes'].fillna(0)
+    data['delta'] = data['timestamp'].diff().dt.total_seconds()
+    data['delta'] = data['delta'].fillna(0)
+
+    # Чистим
+    data = data.drop(columns=['timestamp', 'row_id', ])
+
+    return data
+
+
+def get_train_test_data():
+    data_test = pd.read_csv('test.csv')
+    data_train = pd.read_csv('train.csv').drop(columns='user_id')
+
+    data_test = get_features(data_test)
+    data_train = get_features(data_train)
+    #print(data_test.shape, data_train.shape)
+
+    ohe = make_column_transformer((OneHotEncoder(handle_unknown='ignore', sparse_output=False),
+                                   ['day_of_month', 'hour', 'min', 'gate_id', 'day_of_the_week', 'part_of_the_day',
+                                    'season']),
+                                  remainder='passthrough')
+
+    vectorized_train = ohe.fit_transform(data_train)
+    vectorized_test = ohe.transform(data_test)
+    #print(vectorized_test.shape, vectorized_train.shape)
+
+    y_train = np.array(pd.read_csv('train.csv').user_id, dtype=int)
+
+    return (vectorized_train, y_train), (vectorized_test, vectorized_test[:, 0].astype(int))

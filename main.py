@@ -23,27 +23,25 @@ device = torch.device(dev)
 
 # Модель
 model = nn.Sequential(
-    nn.Linear(141, 58),
-    nn.BatchNorm1d(128),
+    nn.Linear(142, 185),
+    nn.BatchNorm1d(185),
     nn.ReLU(),
-    nn.Dropout(0.069),
-    nn.Linear(128, 139),
+    nn.Dropout(0.44),
+    nn.Linear(185, 185),
     nn.ReLU(),
-    nn.Dropout(0.0155),
-    nn.Linear(139, 195),
-    nn.ReLU(),
-    nn.Dropout(0.017),
-    nn.Linear(195, 58),
+    nn.Dropout(0.415),
+    nn.Linear(185, 58),
+
 )
 model.to(device)
 model.type(torch.cuda.FloatTensor)
 
 # Hyper Params
-num_epochs = 300
-batch_size = 142
-learning_rate = 0.00235
-weight_decay = 0.0001
-validation_split = .15
+num_epochs = 280
+batch_size = 1000 #305
+learning_rate = 0.00183
+weight_decay = 0.000429
+validation_split = .2
 
 # Загрузка данных
 data_train = TurnstileDataset(normalize=True)
@@ -51,10 +49,10 @@ train_loader, val_loader = get_alternative_loaders(batch_size=batch_size, data_t
 
 # Loss Function, Optimizer
 loss = nn.CrossEntropyLoss().type(torch.cuda.FloatTensor)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+optimizer = optim.RMSprop(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 # LR Annealing
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.83, patience=7)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.15144, patience=15)
 
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -71,7 +69,7 @@ params = {
     'weight_decay': weight_decay,
     'validation_split': validation_split,
     'optimizer': 'Adam',
-    'annealing_factor': .83
+    'annealing_factor': .15144
 }
 run["parameters"] = params
 

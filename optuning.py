@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from tqdm import tqdm
-from data_functions import TurnstileDataset, get_loaders
+from data_functions import TurnstileDataset, get_loaders, get_alternative_loaders
 from metrics_functions import compute_binary_accuracy, validation_loss
 from datetime import datetime
 
@@ -20,12 +20,16 @@ device = torch.device(dev)
 
 def define_model(trial):
     n_layers = trial.suggest_int('n_layers', 1, 3)
+    batchnorm = trial.suggest_int('have_batchnorm', 0, 1)
     layers = []
 
-    in_features = 34
+    in_features = 142
     for i in range(n_layers):
-        out_features = trial.suggest_int('n_units_l{}'.format(i), 34, 200)
+        out_features = trial.suggest_int('n_units_l{}'.format(i), 50, 200)
         layers.append(nn.Linear(in_features, out_features))
+        if batchnorm == 1:
+            layers.insert(1, nn.BatchNorm1d(out_features))
+            batchnorm = 0
         layers.append(nn.ReLU(inplace=True))
         p = trial.suggest_float('droput_l{}'.format(i), .0, .5)
         layers.append(nn.Dropout(p))
@@ -36,6 +40,8 @@ def define_model(trial):
     if softm == 1:
         layers.append(nn.Softmax(dim=1))
 
+
+
     return nn.Sequential(*layers)
 
 
@@ -45,19 +51,19 @@ def objective(trial):
     model.type(torch.cuda.FloatTensor)
 
     optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'Adagrad', 'SGD', 'RMSprop'])
-    weight_decay = trial.suggest_float('weight_decay', 1e-3, 1e-2)
+    weight_decay = trial.suggest_float('weight_decay', 1e-4, 1e-1)
     factor = trial.suggest_float('LR_Annealing_factor', .05, .9)
-    patience = trial.suggest_int('LR_Annealing_patience', 3, 50)
+    patience = trial.suggest_int('LR_Annealing_patience', 3, 30)
     lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss = nn.CrossEntropyLoss().type(torch.cuda.FloatTensor)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=factor, patience=patience)
 
-    num_epochs = trial.suggest_int('num_epochs', 200, 500)
+    num_epochs = trial.suggest_int('num_epochs', 150, 300)
     batch_size = trial.suggest_int('batch_size', 64, 512)
-    validation_split = 0.1
+    validation_split = 0.2
     data_train = TurnstileDataset(normalize=True)
-    train_loader, val_loader = get_loaders(batch_size=batch_size, data_train=data_train,
+    train_loader, val_loader = get_alternative_loaders(batch_size=batch_size, data_train=data_train,
                                            validation_split=validation_split)
 
     config = configparser.ConfigParser()
@@ -137,9 +143,9 @@ def objective(trial):
 
 
 if __name__ == '__main__':
-    study = optuna.create_study(direction="minimize", study_name='first_try_turnstiles',
-                                storage=f'sqlite:///{datetime.now().strftime("optuna_%d%m%y%H%M")}.db')
-    study.optimize(objective, n_trials=2400, timeout=46800)
+    study = optuna.create_study(direction="minimize", study_name=f'optuna_0904232236',
+                                storage=f'sqlite:///first_try_turnstiles.db', load_if_exists=True)
+    study.optimize(objective, n_trials=2, timeout=1000)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
